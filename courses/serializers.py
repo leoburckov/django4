@@ -13,18 +13,32 @@ class LessonSerializer(serializers.ModelSerializer):
 class CourseListSerializer(serializers.ModelSerializer):
     """Serializer for Course list view."""
 
-    lessons_count = serializers.IntegerField(source='lessons.count', read_only=True)
+    # Задание 1: Добавляем поле количества уроков через SerializerMethodField
+    lessons_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Course
-        fields = ['id', 'title', 'preview', 'description', 'lessons_count', 'created_at']
+        fields = ['id', 'title', 'preview', 'description',
+                  'lessons_count', 'created_at']
+
+    def get_lessons_count(self, obj):
+        """Get count of lessons for the course."""
+        return obj.lessons.count()
 
 
 class CourseDetailSerializer(serializers.ModelSerializer):
     """Serializer for Course detail view."""
 
+    # Задание 1: Добавляем и здесь для детального просмотра
+    lessons_count = serializers.SerializerMethodField()
+
+    # Задание 3: Добавляем вывод уроков через связанный сериализатор
     lessons = LessonSerializer(many=True, read_only=True)
 
     class Meta:
         model = Course
         fields = '__all__'
+
+    def get_lessons_count(self, obj):
+        """Get count of lessons for the course."""
+        return obj.lessons.count()

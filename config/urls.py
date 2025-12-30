@@ -2,12 +2,11 @@ from django.contrib import admin
 from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
-from django.http import HttpResponse
 
 
-# Простое представление для корневого URL
 def home_view(request):
-    return HttpResponse("""
+    from django.http import HttpResponse
+    html = """
     <html>
     <head>
         <title>Django LMS API</title>
@@ -23,29 +22,28 @@ def home_view(request):
     </head>
     <body>
         <h1>🎓 Django LMS API</h1>
-        <p>Добро пожаловать в систему управления обучением!</p>
 
         <h2>📚 Доступные API-эндпоинты:</h2>
         <ul>
-            <li><a href="/api/courses/">📖 Список курсов</a> - <code>GET /api/courses/</code></li>
-            <li><a href="/api/lessons/">📝 Список уроков</a> - <code>GET /api/lessons/</code></li>
-            <li><a href="/admin/">⚙️ Админ-панель</a> - <code>/admin/</code></li>
-            <li><a href="/api-auth/login/">🔐 API аутентификация</a> - <code>/api-auth/login/</code></li>
+            <li><a href="/api/courses/">📖 Список курсов</a></li>
+            <li><a href="/api/lessons/">📝 Список уроков</a></li>
+            <li><a href="/api/payments/">💰 Список платежей</a></li>
+            <li><a href="/admin/">⚙️ Админ-панель</a></li>
         </ul>
 
-        <h2>🛠 Использование с Postman:</h2>
+        <h2>🔍 Фильтрация платежей:</h2>
         <ul>
-            <li>Создание курса: <code>POST /api/courses/</code></li>
-            <li>Создание урока: <code>POST /api/lessons/</code></li>
-            <li>Получение курса: <code>GET /api/courses/1/</code></li>
-            <li>Обновление урока: <code>PUT /api/lessons/1/</code></li>
-            <li>Удаление урока: <code>DELETE /api/lessons/1/</code></li>
+            <li><code>/api/payments/?ordering=payment_date</code> - сортировка по дате</li>
+            <li><code>/api/payments/?ordering=-payment_date</code> - сортировка по дате (по убыванию)</li>
+            <li><code>/api/payments/?paid_course=1</code> - фильтр по курсу</li>
+            <li><code>/api/payments/?paid_lesson=1</code> - фильтр по уроку</li>
+            <li><code>/api/payments/?payment_method=transfer</code> - фильтр по способу оплаты</li>
+            <li><code>/api/payments/?payment_date__gte=2024-01-01</code> - с даты</li>
         </ul>
-
-        <p>Для работы с API используйте Postman или другой HTTP-клиент.</p>
     </body>
     </html>
-    """)
+    """
+    return HttpResponse(html)
 
 
 urlpatterns = [
@@ -53,6 +51,7 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('api-auth/', include('rest_framework.urls')),
     path('api/', include('courses.urls')),
+    path('api/', include('users.urls')),  # добавляем маршруты для users
 ]
 
 if settings.DEBUG:
