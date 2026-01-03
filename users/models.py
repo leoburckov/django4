@@ -2,7 +2,6 @@ from django.contrib.auth.models import AbstractUser
 from django.db import models
 from django.contrib.auth.base_user import BaseUserManager
 from django.utils.translation import gettext_lazy as _
-from courses.models import Course, Lesson
 
 
 class UserManager(BaseUserManager):
@@ -60,7 +59,7 @@ class Payment(models.Model):
 
     # Поля для оплаты курса или урока (одно из них должно быть заполнено)
     paid_course = models.ForeignKey(
-        Course,
+        'courses.Course',  # Используем строковую ссылку
         on_delete=models.CASCADE,
         related_name='payments',
         verbose_name='Оплаченный курс',
@@ -68,7 +67,7 @@ class Payment(models.Model):
         null=True
     )
     paid_lesson = models.ForeignKey(
-        Lesson,
+        'courses.Lesson',  # Используем строковую ссылку
         on_delete=models.CASCADE,
         related_name='payments',
         verbose_name='Оплаченный урок',

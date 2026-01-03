@@ -12,6 +12,14 @@ class Course(models.Model):
         null=True
     )
     description = models.TextField(verbose_name='Описание', blank=True, null=True)
+    owner = models.ForeignKey(
+        'users.User',  # Используем строковую ссылку вместо импорта
+        on_delete=models.SET_NULL,
+        verbose_name='Владелец',
+        null=True,
+        blank=True,
+        related_name='owned_courses'
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -42,6 +50,14 @@ class Lesson(models.Model):
         null=True
     )
     video_url = models.URLField(verbose_name='Ссылка на видео', blank=True, null=True)
+    owner = models.ForeignKey(
+        'users.User',  # Используем строковую ссылку вместо импорта
+        on_delete=models.SET_NULL,
+        verbose_name='Владелец',
+        null=True,
+        blank=True,
+        related_name='owned_lessons'
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
