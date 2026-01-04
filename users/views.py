@@ -9,21 +9,25 @@ from .serializers import (
     UserSerializer, UserRegisterSerializer,
     UserLoginSerializer, PaymentSerializer
 )
-from .permissions import IsModerator, IsOwner
+from .permissions import IsOwner, IsModerator, IsOwnerOrModerator
 
 
 class UserViewSet(viewsets.ModelViewSet):
-    """ViewSet for User model."""
+    """ViewSet for User model with proper permissions."""
 
     queryset = User.objects.all()
     serializer_class = UserSerializer
-    permission_classes = [permissions.IsAuthenticated]
 
     def get_permissions(self):
-        """Разрешаем регистрацию без авторизации."""
-        if self.action == 'create':
+        """Custom permissions for different actions."""
+        if self.action in ['register', 'login']:
             return [permissions.AllowAny()]
-        return super().get_permissions()
+        elif self.action in ['retrieve', 'update', 'partial_update', 'destroy']:
+            return [permissions.IsAuthenticated(), IsOwner()]
+        elif self.action in ['list']:
+            return [permissions.IsAuthenticated(), IsModerator()]  # Только модераторы видят список
+        else:
+            return [permissions.IsAuthenticated()]
 
     @action(detail=False, methods=['post'], permission_classes=[permissions.AllowAny])
     def register(self, request):
@@ -69,11 +73,11 @@ class UserViewSet(viewsets.ModelViewSet):
 
 
 class PaymentViewSet(viewsets.ModelViewSet):
-    """ViewSet for Payment model with filtering and ordering."""
+    """ViewSet for Payment model with proper permissions."""
 
     queryset = Payment.objects.all()
     serializer_class = PaymentSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsOwnerOrModerator]
 
     filter_backends = [DjangoFilterBackend, OrderingFilter, SearchFilter]
     filterset_fields = {
@@ -85,6 +89,10 @@ class PaymentViewSet(viewsets.ModelViewSet):
     search_fields = ['user__email', 'paid_course__title', 'paid_lesson__title']
     ordering_fields = ['payment_date', 'amount']
     ordering = ['-payment_date']
+
+    def perform_create(self, serializer):
+        """Automatically set user when creating a payment."""
+        serializer.save(user=self.request.user)
 
     def get_queryset(self):
         """Users can only see their own payments, moderators can see all."""
