@@ -1,5 +1,7 @@
 from django.db import models
-from django.core.exceptions import ValidationError
+from django.contrib.auth import get_user_model  # Используем этот метод!
+
+User = get_user_model()  # Получаем модель пользователя динамически
 
 
 class Course(models.Model):
@@ -13,14 +15,6 @@ class Course(models.Model):
         null=True
     )
     description = models.TextField(verbose_name='Описание', blank=True, null=True)
-    owner = models.ForeignKey(
-        'users.User',
-        on_delete=models.SET_NULL,
-        verbose_name='Владелец',
-        null=True,
-        blank=True,
-        related_name='owned_courses'
-    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -50,20 +44,7 @@ class Lesson(models.Model):
         blank=True,
         null=True
     )
-    video_url = models.URLField(
-        verbose_name='Ссылка на видео',
-        blank=True,
-        null=True,
-        validators=[]  # Валидатор будет в сериализаторе
-    )
-    owner = models.ForeignKey(
-        'users.User',
-        on_delete=models.SET_NULL,
-        verbose_name='Владелец',
-        null=True,
-        blank=True,
-        related_name='owned_lessons'
-    )
+    video_url = models.URLField(verbose_name='Ссылка на видео', blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -76,35 +57,76 @@ class Lesson(models.Model):
         return f'{self.title} - {self.course.title}'
 
 
-class Subscription(models.Model):
-    """Subscription model for course updates."""
+class Payment(models.Model):
+    """Payment model for course purchases."""
+
+    STATUS_CHOICES = [
+        ('pending', 'Ожидает оплаты'),
+        ('processing', 'Обрабатывается'),
+        ('succeeded', 'Оплачено'),
+        ('failed', 'Не удалось'),
+        ('canceled', 'Отменено'),
+    ]
 
     user = models.ForeignKey(
-        'users.User',
+        User,
         on_delete=models.CASCADE,
-        related_name='subscriptions',
+        related_name='payments',
         verbose_name='Пользователь'
     )
     course = models.ForeignKey(
-        Course,
+        'Course',  # Используем строковую ссылку
         on_delete=models.CASCADE,
-        related_name='subscriptions',
+        related_name='payments',
         verbose_name='Курс'
     )
-    created_at = models.DateTimeField(auto_now_add=True, verbose_name='Дата подписки')
+    amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        verbose_name='Сумма'
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default='pending',
+        verbose_name='Статус'
+    )
+    stripe_product_id = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+        verbose_name='ID продукта в Stripe'
+    )
+    stripe_price_id = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+        verbose_name='ID цены в Stripe'
+    )
+    stripe_session_id = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+        verbose_name='ID сессии в Stripe'
+    )
+    stripe_payment_intent_id = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+        verbose_name='ID платежа в Stripe'
+    )
+    payment_url = models.URLField(
+        blank=True,
+        null=True,
+        verbose_name='Ссылка на оплату'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        verbose_name = 'Подписка'
-        verbose_name_plural = 'Подписки'
-        unique_together = ['user', 'course']  # Одна подписка на курс для пользователя
+        verbose_name = 'Платеж'
+        verbose_name_plural = 'Платежи'
         ordering = ['-created_at']
 
     def __str__(self):
-        return f'{self.user.email} подписан на {self.course.title}'
-
-    def clean(self):
-        """Validate subscription."""
-        from django.core.exceptions import ValidationError
-        # Проверяем, что пользователь не подписывается на свой же курс
-        if self.course.owner == self.user:
-            raise ValidationError('Нельзя подписаться на свой собственный курс')
+        return f'{self.user.email} - {self.course.title} - {self.amount}'
