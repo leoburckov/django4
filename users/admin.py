@@ -1,12 +1,12 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
-from .models import User
+from .models import User  # Убираем Payment из импорта
 
 
 class CustomUserAdmin(UserAdmin):
     model = User
-    list_display = ('email', 'first_name', 'last_name', 'is_staff')
-    ordering = ('email',)
+    list_display = ('email', 'first_name', 'last_name', 'phone', 'city', 'is_staff')
+    list_filter = ('is_staff', 'is_superuser', 'is_active')
     fieldsets = (
         (None, {'fields': ('email', 'password')}),
         ('Personal info', {'fields': ('first_name', 'last_name', 'phone', 'city', 'avatar')}),
@@ -19,6 +19,8 @@ class CustomUserAdmin(UserAdmin):
             'fields': ('email', 'password1', 'password2', 'first_name', 'last_name', 'phone', 'city'),
         }),
     )
+    search_fields = ('email', 'first_name', 'last_name')
+    ordering = ('email',)
 
 
 admin.site.register(User, CustomUserAdmin)

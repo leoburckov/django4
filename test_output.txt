@@ -1,0 +1,11 @@
+Found 28 test(s).
+System check identified no issues (0 silenced).
+
+=== DIAGNOSTIC TEST ===
+Created lesson ID: 3
+Video URL: https://www.youtube.com/watch?v=diagnostic123
+Response status: 200
+Response data: {'id': 3, 'title': 'Новое название', 'description': 'Описание', 'preview': None, 'video_url': 'https://www.youtube.com/watch?v=diagnostic123', 'created_at': '2026-01-05T21:06:34.446562Z', 'updated_at': '2026-01-05T21:06:34.450385Z', 'course': 1, 'owner': 2}
+Success! Updated title: Новое название
+=== END DIAGNOSTIC ===
+

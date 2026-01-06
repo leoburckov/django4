@@ -1,8 +1,25 @@
 from django.contrib import admin
-from django.urls import path, include
+from django.urls import path, include, re_path
 from django.conf import settings
 from django.conf.urls.static import static
 from django.http import HttpResponse
+from rest_framework import permissions
+from drf_yasg.views import get_schema_view
+from drf_yasg import openapi
+
+# Документация API
+schema_view = get_schema_view(
+    openapi.Info(
+        title="Django LMS API",
+        default_version='v1',
+        description="API системы управления обучением",
+        terms_of_service="https://www.google.com/policies/terms/",
+        contact=openapi.Contact(email="contact@lms.local"),
+        license=openapi.License(name="BSD License"),
+    ),
+    public=True,
+    permission_classes=[permissions.AllowAny],
+)
 
 
 # Простое представление для корневого URL
@@ -25,24 +42,19 @@ def home_view(request):
         <h1>🎓 Django LMS API</h1>
         <p>Добро пожаловать в систему управления обучением!</p>
 
-        <h2>📚 Доступные API-эндпоинты:</h2>
+        <h2>📚 Документация API:</h2>
         <ul>
-            <li><a href="/api/courses/">📖 Список курсов</a> - <code>GET /api/courses/</code></li>
-            <li><a href="/api/lessons/">📝 Список уроков</a> - <code>GET /api/lessons/</code></li>
-            <li><a href="/admin/">⚙️ Админ-панель</a> - <code>/admin/</code></li>
-            <li><a href="/api-auth/login/">🔐 API аутентификация</a> - <code>/api-auth/login/</code></li>
+            <li><a href="/swagger/">📖 Swagger UI</a> - интерактивная документация</li>
+            <li><a href="/redoc/">📘 ReDoc</a> - альтернативная документация</li>
         </ul>
 
-        <h2>🛠 Использование с Postman:</h2>
+        <h2>🔧 Основные эндпоинты:</h2>
         <ul>
-            <li>Создание курса: <code>POST /api/courses/</code></li>
-            <li>Создание урока: <code>POST /api/lessons/</code></li>
-            <li>Получение курса: <code>GET /api/courses/1/</code></li>
-            <li>Обновление урока: <code>PUT /api/lessons/1/</code></li>
-            <li>Удаление урока: <code>DELETE /api/lessons/1/</code></li>
+            <li><a href="/api/courses/">📖 Курсы</a></li>
+            <li><a href="/api/lessons/">📝 Уроки</a></li>
+            <li><a href="/api/payments/">💳 Платежи</a> (новое)</li>
+            <li><a href="/admin/">⚙️ Админ-панель</a></li>
         </ul>
-
-        <p>Для работы с API используйте Postman или другой HTTP-клиент.</p>
     </body>
     </html>
     """)
@@ -53,6 +65,17 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('api-auth/', include('rest_framework.urls')),
     path('api/', include('courses.urls')),
+
+    # Документация
+    re_path(r'^swagger(?P<format>\.json|\.yaml)$',
+            schema_view.without_ui(cache_timeout=0),
+            name='schema-json'),
+    re_path(r'^swagger/$',
+            schema_view.with_ui('swagger', cache_timeout=0),
+            name='schema-swagger-ui'),
+    re_path(r'^redoc/$',
+            schema_view.with_ui('redoc', cache_timeout=0),
+            name='schema-redoc'),
 ]
 
 if settings.DEBUG:
