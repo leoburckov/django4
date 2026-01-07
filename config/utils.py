@@ -8,5 +8,5 @@ def get_env_variable(var_name, default=None):
     except KeyError:
         if default is not None:
             return default
-        error_msg = f'Set the {var_name} environment variable'
+        error_msg = f"Set the {var_name} environment variable"
         raise ValueError(error_msg)
