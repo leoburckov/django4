@@ -127,3 +127,4 @@ class Command(BaseCommand):
         self.stdout.write("1. Модератор: moderator@example.com / moderator123")
         self.stdout.write("2. Обычный пользователь: user@example.com / user123")
         self.stdout.write("3. Курсы и уроки принадлежат разным пользователям")
+
