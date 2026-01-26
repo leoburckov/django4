@@ -1,6 +1,9 @@
 from rest_framework import serializers
-from .models import Course, Lesson, Subscription
-from .validators import YouTubeURLValidator, validate_youtube_url
+from django.contrib.auth import get_user_model
+from .models import Course, Lesson, Payment, Subscription
+from .services.stripe_service import StripeService
+
+User = get_user_model()
 
 
 class LessonSerializer(serializers.ModelSerializer):
@@ -8,70 +11,137 @@ class LessonSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Lesson
-        fields = '__all__'
-        validators = [
-            YouTubeURLValidator(field='video_url'),
-        ]
-
-    # Альтернативный вариант с функцией-валидатором
-    # video_url = serializers.URLField(validators=[validate_youtube_url])
+        fields = "__all__"
 
 
-class CourseListSerializer(serializers.ModelSerializer):
-    """Serializer for Course list view."""
+class CourseSerializer(serializers.ModelSerializer):
+    """Serializer for Course model."""
 
-    lessons_count = serializers.SerializerMethodField()
-    is_subscribed = serializers.SerializerMethodField()
+    lessons_count = serializers.IntegerField(source="lessons.count", read_only=True)
 
     class Meta:
         model = Course
+        fields = "__all__"
+
+
+class PaymentSerializer(serializers.ModelSerializer):
+    """Serializer for Payment model."""
+
+    user_email = serializers.EmailField(source="user.email", read_only=True)
+    course_title = serializers.CharField(source="course.title", read_only=True)
+
+    class Meta:
+        model = Payment
         fields = [
-            'id', 'title', 'preview', 'description',
-            'lessons_count', 'created_at', 'owner', 'is_subscribed'
+            "id",
+            "user",
+            "user_email",
+            "course",
+            "course_title",
+            "amount",
+            "status",
+            "stripe_product_id",
+            "stripe_price_id",
+            "stripe_session_id",
+            "payment_url",
+            "created_at",
+        ]
+        read_only_fields = [
+            "user",
+            "amount",
+            "status",
+            "stripe_product_id",
+            "stripe_price_id",
+            "stripe_session_id",
+            "payment_url",
+            "created_at",
         ]
 
-    def get_lessons_count(self, obj):
-        """Get count of lessons for the course."""
-        return obj.lessons.count()
 
-    def get_is_subscribed(self, obj):
-        """Check if current user is subscribed to the course."""
-        request = self.context.get('request')
-        if request and request.user.is_authenticated:
-            return obj.subscriptions.filter(user=request.user).exists()
-        return False
-
-
-class CourseDetailSerializer(serializers.ModelSerializer):
-    """Serializer for Course detail view."""
-
-    lessons_count = serializers.SerializerMethodField()
-    lessons = LessonSerializer(many=True, read_only=True)
-    is_subscribed = serializers.SerializerMethodField()
+class PaymentCreateSerializer(serializers.ModelSerializer):
+    """Serializer for creating payments."""
 
     class Meta:
-        model = Course
-        fields = '__all__'
+        model = Payment
+        fields = ["course"]
 
-    def get_lessons_count(self, obj):
-        """Get count of lessons for the course."""
-        return obj.lessons.count()
+    def validate(self, attrs):
+        """Validate payment data."""
+        request = self.context.get("request")
+        if not request or not request.user.is_authenticated:
+            raise serializers.ValidationError("User is not authenticated")
 
-    def get_is_subscribed(self, obj):
-        """Check if current user is subscribed to the course."""
-        request = self.context.get('request')
-        if request and request.user.is_authenticated:
-            return obj.subscriptions.filter(user=request.user).exists()
-        return False
+        course = attrs.get("course")
+        if not course.price or course.price <= 0:
+            raise serializers.ValidationError("Course cannot be free")
+
+        return attrs
+
+    def create(self, validated_data):
+        """Create payment and Stripe checkout session."""
+        request = self.context.get("request")
+        user = request.user
+        course = validated_data["course"]
+
+        # Create Stripe product
+        product_id = StripeService.create_product(
+            name=course.title,
+            description=course.description or "",
+        )
+
+        # Create Stripe price
+        price_id = StripeService.create_price(
+            product_id=product_id,
+            amount=float(course.price),
+            currency="rub",
+        )
+
+        # Create Stripe checkout session
+        success_url = f'{request.build_absolute_uri("/")}api/payments/success/'
+        cancel_url = f'{request.build_absolute_uri("/")}api/payments/cancel/'
+
+        session_data = StripeService.create_checkout_session(
+            price_id=price_id,
+            success_url=success_url,
+            cancel_url=cancel_url,
+            metadata={
+                "payment_type": "course_purchase",
+                "course_id": str(course.id),
+                "user_id": str(user.id),
+            },
+        )
+
+        # Create payment record
+        payment = Payment.objects.create(
+            user=user,
+            course=course,
+            amount=course.price,
+            stripe_product_id=product_id,
+            stripe_price_id=price_id,
+            stripe_session_id=session_data["session_id"],
+            stripe_payment_intent_id=session_data.get("payment_intent_id"),
+            payment_url=session_data["payment_url"],
+            status=Payment.STATUS_PENDING,
+        )
+
+        return payment
 
 
-    class SubscriptionSerializer(serializers.ModelSerializer):
-        """Serializer for Subscription model."""
+class SubscriptionSerializer(serializers.ModelSerializer):
+    """Serializer for Subscription model."""
 
-        user_email = serializers.EmailField(source='user.email', read_only=True)
-        course_title = serializers.CharField(source='course.title', read_only=True)
+    user_email = serializers.EmailField(source='user.email', read_only=True)
+    course_title = serializers.CharField(source='course.title', read_only=True)
 
-        class Meta:
-            model = Subscription
-            fields = ['id', 'user', 'user_email', 'course', 'course_title', 'created_at']
-            read_only_fields = ['created_at']
+    class Meta:
+        model = Subscription
+        fields = [
+            'id',
+            'user',
+            'user_email',
+            'course',
+            'course_title',
+            'is_active',
+            'created_at',
+        ]
+        read_only_fields = ['user', 'is_active', 'created_at']

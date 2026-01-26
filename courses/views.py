@@ -1,244 +1,305 @@
-from rest_framework import viewsets, generics, permissions, status
+from rest_framework import viewsets, generics, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from django.shortcuts import get_object_or_404
-from django_filters.rest_framework import DjangoFilterBackend
-from rest_framework.filters import OrderingFilter, SearchFilter
+from rest_framework.permissions import IsAuthenticated
+from drf_yasg.utils import swagger_auto_schema
+from drf_yasg import openapi
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+from django.utils.decorators import method_decorator
 
-from .models import Course, Lesson, Subscription
+from .models import Course, Lesson, Payment, Subscription
 from .serializers import (
-    CourseListSerializer, CourseDetailSerializer,
-    LessonSerializer
+    CourseSerializer,
+    LessonSerializer,
+    PaymentSerializer,
+    PaymentCreateSerializer,
+    SubscriptionSerializer,
 )
-
-
-from users.permissions import CourseLessonPermission
-from .paginators import CoursePagination, LessonPagination
-
-from rest_framework import serializers
-
-
-class SubscriptionSerializer(serializers.ModelSerializer):
-    """Локальный сериализатор для Subscription."""
-
-    user_email = serializers.EmailField(source='user.email', read_only=True)
-    course_title = serializers.CharField(source='course.title', read_only=True)
-
-    class Meta:
-        model = Subscription
-        fields = ['id', 'user', 'user_email', 'course', 'course_title', 'created_at']
-        read_only_fields = ['created_at']
+from .services.stripe_service import StripeService
+from .tasks import send_course_update_notification, send_lesson_update_notification
 
 
 class CourseViewSet(viewsets.ModelViewSet):
-    """ViewSet для модели Course."""
+    """
+    API endpoint for Course model.
+    """
 
     queryset = Course.objects.all()
-    serializer_class = CourseListSerializer
-    permission_classes = [permissions.IsAuthenticated, CourseLessonPermission]
-    pagination_class = CoursePagination
+    serializer_class = CourseSerializer
 
-    filter_backends = [DjangoFilterBackend, OrderingFilter, SearchFilter]
-    filterset_fields = ['owner', 'created_at']
-    search_fields = ['title', 'description']
-    ordering_fields = ['title', 'created_at', 'updated_at']
-    ordering = ['-created_at']
+    def perform_update(self, serializer):
+        """Send notifications after course update."""
+        instance = serializer.save()
+        # Trigger async notification task
+        send_course_update_notification.delay(instance.id)
 
-    def get_serializer_class(self):
-        if self.action == 'retrieve':
-            return CourseDetailSerializer
-        return CourseListSerializer
-
-    def perform_create(self, serializer):
-        serializer.save(owner=self.request.user)
-
-    def get_serializer_context(self):
-        context = super().get_serializer_context()
-        context['request'] = self.request
-        return context
-
+    @swagger_auto_schema(
+        method='get',
+        operation_description='Get all lessons for specific course',
+        responses={
+            200: LessonSerializer(many=True),
+            404: 'Course not found'
+        }
+    )
     @action(detail=True, methods=['get'])
     def lessons(self, request, pk=None):
+        """
+        Get lessons for specific course.
+        """
         course = self.get_object()
         lessons = course.lessons.all()
-        paginator = LessonPagination()
-        paginated_lessons = paginator.paginate_queryset(lessons, request)
-        serializer = LessonSerializer(paginated_lessons, many=True)
-        return paginator.get_paginated_response(serializer.data)
+        serializer = LessonSerializer(lessons, many=True)
+        return Response(serializer.data)
 
-    @action(detail=True, methods=['post'])
+    @swagger_auto_schema(
+        method='post',
+        operation_description='Subscribe to course updates',
+        responses={
+            201: 'Subscribed successfully',
+            400: 'Already subscribed'
+        }
+    )
+    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
     def subscribe(self, request, pk=None):
+        """Subscribe to course updates."""
         course = self.get_object()
         user = request.user
 
-        if course.owner == user:
+        subscription, created = Subscription.objects.get_or_create(
+            user=user,
+            course=course,
+            defaults={'is_active': True}
+        )
+
+        if not created and subscription.is_active:
             return Response(
-                {'error': 'Нельзя подписаться на свой собственный курс'},
+                {'detail': 'Already subscribed to this course'},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        subscription = Subscription.objects.filter(user=user, course=course)
+        subscription.is_active = True
+        subscription.save()
 
-        if subscription.exists():
-            subscription.delete()
-            message = 'Подписка удалена'
-            subscribed = False
-        else:
-            Subscription.objects.create(user=user, course=course)
-            message = 'Подписка добавлена'
-            subscribed = True
+        return Response(
+            {'detail': 'Successfully subscribed to course updates'},
+            status=status.HTTP_201_CREATED
+        )
 
-        return Response({
-            'message': message,
-            'subscribed': subscribed,
-            'course_id': course.id,
-            'course_title': course.title
-        })
-
-    @action(detail=False, methods=['get'])
-    def subscribed(self, request):
+    @swagger_auto_schema(
+        method='post',
+        operation_description='Unsubscribe from course updates',
+        responses={
+            200: 'Unsubscribed successfully',
+            404: 'Subscription not found'
+        }
+    )
+    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
+    def unsubscribe(self, request, pk=None):
+        """Unsubscribe from course updates."""
+        course = self.get_object()
         user = request.user
-        subscribed_courses = Course.objects.filter(subscriptions__user=user)
-        page = self.paginate_queryset(subscribed_courses)
-        if page is not None:
-            serializer = self.get_serializer(page, many=True)
-            return self.get_paginated_response(serializer.data)
-        serializer = self.get_serializer(subscribed_courses, many=True)
-        return Response(serializer.data)
-
-    @action(detail=False, methods=['get'])
-    def my_courses(self, request):
-        user = request.user
-        my_courses = Course.objects.filter(owner=user)
-        page = self.paginate_queryset(my_courses)
-        if page is not None:
-            serializer = self.get_serializer(page, many=True)
-            return self.get_paginated_response(serializer.data)
-        serializer = self.get_serializer(my_courses, many=True)
-        return Response(serializer.data)
-
-
-class LessonListCreateView(generics.ListCreateAPIView):
-    """View для получения списка уроков и создания нового урока."""
-
-    serializer_class = LessonSerializer
-    permission_classes = [permissions.IsAuthenticated, CourseLessonPermission]
-    pagination_class = LessonPagination
-
-    filter_backends = [DjangoFilterBackend, OrderingFilter, SearchFilter]
-    filterset_fields = ['course', 'owner', 'created_at']
-    search_fields = ['title', 'description']
-    ordering_fields = ['title', 'created_at', 'updated_at']
-    ordering = ['-created_at']
-
-    def get_queryset(self):
-        queryset = Lesson.objects.all()
-        course_id = self.request.query_params.get('course_id')
-        if course_id:
-            queryset = queryset.filter(course_id=course_id)
-        owner_id = self.request.query_params.get('owner_id')
-        if owner_id:
-            queryset = queryset.filter(owner_id=owner_id)
-        return queryset
-
-    def perform_create(self, serializer):
-        serializer.save(owner=self.request.user)
-
-
-class LessonRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
-    """View для получения, обновления и удаления конкретного урока."""
-
-    queryset = Lesson.objects.all()
-    serializer_class = LessonSerializer
-    permission_classes = [permissions.IsAuthenticated, CourseLessonPermission]
-
-
-class SubscriptionAPIView(APIView):
-    """API View для управления подписками на курсы."""
-
-    permission_classes = [permissions.IsAuthenticated]
-
-    def get(self, request, *args, **kwargs):
-        user = request.user
-        subscriptions = Subscription.objects.filter(user=user)
-        paginator = CoursePagination()
-        paginated_subscriptions = paginator.paginate_queryset(subscriptions, request)
-        serializer = SubscriptionSerializer(paginated_subscriptions, many=True)
-        return paginator.get_paginated_response(serializer.data)
-
-    def post(self, request, *args, **kwargs):
-        user = request.user
-        course_id = request.data.get('course_id')
-
-        if not course_id:
-            return Response(
-                {'error': 'Параметр course_id обязателен'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
 
         try:
-            course = Course.objects.get(id=course_id)
-        except Course.DoesNotExist:
+            subscription = Subscription.objects.get(user=user, course=course)
+            subscription.is_active = False
+            subscription.save()
             return Response(
-                {'error': 'Курс не найден'},
+                {'detail': 'Successfully unsubscribed from course updates'}
+            )
+        except Subscription.DoesNotExist:
+            return Response(
+                {'detail': 'Subscription not found'},
                 status=status.HTTP_404_NOT_FOUND
             )
 
-        if course.owner == user:
-            return Response(
-                {'error': 'Нельзя подписаться на свой собственный курс'},
-                status=status.HTTP_400_BAD_REQUEST
+
+class LessonListCreateView(generics.ListCreateAPIView):
+    """
+    API endpoint for listing and creating lessons.
+    """
+
+    queryset = Lesson.objects.all()
+    serializer_class = LessonSerializer
+
+    def perform_create(self, serializer):
+        """Send notifications after lesson creation."""
+        instance = serializer.save()
+        # Trigger async notification task
+        send_lesson_update_notification.delay(instance.id)
+
+
+class LessonRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
+    """
+    API endpoint for retrieving, updating and deleting a lesson.
+    """
+
+    queryset = Lesson.objects.all()
+    serializer_class = LessonSerializer
+
+    def perform_update(self, serializer):
+        """Send notifications after lesson update."""
+        instance = serializer.save()
+        # Trigger async notification task
+        send_lesson_update_notification.delay(instance.id)
+
+
+# ДОБАВЛЯЕМ ОТСУТСТВУЮЩИЕ КЛАССЫ:
+
+class PaymentListCreateView(generics.ListCreateAPIView):
+    """
+    API endpoint for listing and creating payments.
+    """
+
+    permission_classes = [IsAuthenticated]
+    serializer_class = PaymentSerializer
+
+    def get_queryset(self):
+        """Return payments for current user."""
+        return Payment.objects.filter(user=self.request.user)
+
+    def get_serializer_class(self):
+        """Return appropriate serializer based on request method."""
+        if self.request.method == 'POST':
+            return PaymentCreateSerializer
+        return PaymentSerializer
+
+    def perform_create(self, serializer):
+        """Set current user as payment owner."""
+        serializer.save(user=self.request.user)
+
+
+class PaymentRetrieveView(generics.RetrieveAPIView):
+    """
+    API endpoint for retrieving payment details.
+    """
+
+    permission_classes = [IsAuthenticated]
+    serializer_class = PaymentSerializer
+
+    def get_queryset(self):
+        """Return payments for current user."""
+        return Payment.objects.filter(user=self.request.user)
+
+
+class SubscriptionListView(generics.ListAPIView):
+    """
+    API endpoint for listing user's subscriptions.
+    """
+
+    permission_classes = [IsAuthenticated]
+    serializer_class = SubscriptionSerializer
+
+    def get_queryset(self):
+        """Return subscriptions for current user."""
+        return Subscription.objects.filter(
+            user=self.request.user,
+            is_active=True
+        )
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class StripeWebhookView(APIView):
+    """
+    Webhook endpoint for Stripe events.
+    """
+
+    permission_classes = []
+    authentication_classes = []
+
+    @swagger_auto_schema(
+        operation_description='Handle Stripe webhook events',
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                'id': openapi.Schema(type=openapi.TYPE_STRING),
+                'type': openapi.Schema(type=openapi.TYPE_STRING),
+                'data': openapi.Schema(type=openapi.TYPE_OBJECT),
+            }
+        ),
+        responses={
+            200: 'Webhook processed successfully',
+            400: 'Invalid webhook signature',
+        }
+    )
+    def post(self, request):
+        """Handle Stripe webhook."""
+        payload = request.body
+        sig_header = request.META.get('HTTP_STRIPE_SIGNATURE')
+
+        try:
+            # Verify webhook signature
+            import stripe
+            from django.conf import settings
+
+            stripe.api_key = settings.STRIPE_SECRET_KEY
+
+            event = stripe.Webhook.construct_event(
+                payload,
+                sig_header,
+                settings.STRIPE_WEBHOOK_SECRET,
             )
+        except ValueError as e:
+            return JsonResponse({'error': str(e)}, status=400)
+        except stripe.error.SignatureVerificationError as e:
+            return JsonResponse({'error': str(e)}, status=400)
 
-        subscription = Subscription.objects.filter(user=user, course=course)
+        # Handle the event
+        if event['type'] == 'checkout.session.completed':
+            session = event['data']['object']
+            self._handle_checkout_session_completed(session)
+        elif event['type'] == 'checkout.session.expired':
+            session = event['data']['object']
+            self._handle_checkout_session_expired(session)
 
-        if subscription.exists():
-            subscription.delete()
-            message = 'Подписка удалена'
-            subscribed = False
-        else:
-            Subscription.objects.create(user=user, course=course)
-            message = 'Подписка добавлена'
-            subscribed = True
+        return JsonResponse({'status': 'success'})
 
-        return Response({
-            'message': message,
-            'subscribed': subscribed,
-            'course_id': course_id,
-            'course_title': course.title
+    def _handle_checkout_session_completed(self, session):
+        """Handle completed checkout session."""
+        try:
+            payment = Payment.objects.get(stripe_session_id=session['id'])
+            payment.status = Payment.STATUS_SUCCEEDED
+            payment.stripe_payment_intent_id = session.get('payment_intent')
+            payment.save()
+        except Payment.DoesNotExist:
+            pass
+
+    def _handle_checkout_session_expired(self, session):
+        """Handle expired checkout session."""
+        try:
+            payment = Payment.objects.get(stripe_session_id=session['id'])
+            payment.status = Payment.STATUS_CANCELED
+            payment.save()
+        except Payment.DoesNotExist:
+            pass
+
+
+class PaymentSuccessView(APIView):
+    """
+    Success page for payment redirect.
+    """
+
+    permission_classes = []
+
+    def get(self, request):
+        """Return success message."""
+        return JsonResponse({
+            'status': 'success',
+            'message': 'Payment completed successfully',
         })
 
-    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
-    def subscribe(self, request, pk=None):
-        """Подписка/отписка на обновления курса."""
-        course = self.get_object()
-        user = request.user
 
-        # Проверяем, является ли пользователь владельцем курса
-        if course.owner == user:
-            return Response(
-                {'error': 'Нельзя подписаться на свой собственный курс'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+class PaymentCancelView(APIView):
+    """
+    Cancel page for payment redirect.
+    """
 
-        # Проверяем существующую подписку
-        subscription = Subscription.objects.filter(user=user, course=course)
+    permission_classes = []
 
-        if subscription.exists():
-            # Удаляем подписку (отписываемся)
-            subscription.delete()
-            message = 'Подписка удалена'
-            subscribed = False
-        else:
-            # Создаем подписку
-            Subscription.objects.create(user=user, course=course)
-            message = 'Подписка добавлена'
-            subscribed = True
-
-        return Response({
-            'message': message,
-            'subscribed': subscribed,
-            'course_id': course.id,
-            'course_title': course.title
+    def get(self, request):
+        """Return cancel message."""
+        return JsonResponse({
+            'status': 'canceled',
+            'message': 'Payment was canceled',
         })

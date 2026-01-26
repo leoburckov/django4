@@ -1,5 +1,8 @@
 from django.db import models
-from django.core.exceptions import ValidationError
+from django.contrib.auth import get_user_model
+from django.utils import timezone
+
+User = get_user_model()
 
 
 class Course(models.Model):
@@ -10,16 +13,18 @@ class Course(models.Model):
         upload_to='course_previews/',
         verbose_name='Превью',
         blank=True,
-        null=True
+        null=True,
     )
     description = models.TextField(verbose_name='Описание', blank=True, null=True)
-    owner = models.ForeignKey(
-        'users.User',
-        on_delete=models.SET_NULL,
-        verbose_name='Владелец',
-        null=True,
-        blank=True,
-        related_name='owned_courses'
+    price = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0.00,
+        verbose_name='Цена',
+    )
+    last_updated = models.DateTimeField(
+        default=timezone.now,
+        verbose_name='Последнее обновление',
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -32,6 +37,12 @@ class Course(models.Model):
     def __str__(self):
         return self.title
 
+    def save(self, *args, **kwargs):
+        """Update last_updated timestamp on save."""
+        if self.pk:
+            self.last_updated = timezone.now()
+        super().save(*args, **kwargs)
+
 
 class Lesson(models.Model):
     """Lesson model."""
@@ -40,7 +51,7 @@ class Lesson(models.Model):
         Course,
         on_delete=models.CASCADE,
         related_name='lessons',
-        verbose_name='Курс'
+        verbose_name='Курс',
     )
     title = models.CharField(max_length=200, verbose_name='Название урока')
     description = models.TextField(verbose_name='Описание', blank=True, null=True)
@@ -48,21 +59,12 @@ class Lesson(models.Model):
         upload_to='lesson_previews/',
         verbose_name='Превью',
         blank=True,
-        null=True
-    )
-    video_url = models.URLField(
-        verbose_name='Ссылка на видео',
-        blank=True,
         null=True,
-        validators=[]  # Валидатор будет в сериализаторе
     )
-    owner = models.ForeignKey(
-        'users.User',
-        on_delete=models.SET_NULL,
-        verbose_name='Владелец',
-        null=True,
-        blank=True,
-        related_name='owned_lessons'
+    video_url = models.URLField(verbose_name='Ссылка на видео', blank=True, null=True)
+    last_updated = models.DateTimeField(
+        default=timezone.now,
+        verbose_name='Последнее обновление',
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -75,36 +77,118 @@ class Lesson(models.Model):
     def __str__(self):
         return f'{self.title} - {self.course.title}'
 
+    def save(self, *args, **kwargs):
+        """Update last_updated timestamp on save."""
+        if self.pk:
+            self.last_updated = timezone.now()
+        super().save(*args, **kwargs)
+
 
 class Subscription(models.Model):
     """Subscription model for course updates."""
 
     user = models.ForeignKey(
-        'users.User',
+        User,
         on_delete=models.CASCADE,
         related_name='subscriptions',
-        verbose_name='Пользователь'
+        verbose_name='Пользователь',
     )
     course = models.ForeignKey(
         Course,
         on_delete=models.CASCADE,
         related_name='subscriptions',
-        verbose_name='Курс'
+        verbose_name='Курс',
     )
-    created_at = models.DateTimeField(auto_now_add=True, verbose_name='Дата подписки')
+    is_active = models.BooleanField(default=True, verbose_name='Активна')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         verbose_name = 'Подписка'
         verbose_name_plural = 'Подписки'
-        unique_together = ['user', 'course']  # Одна подписка на курс для пользователя
+        unique_together = ['user', 'course']
         ordering = ['-created_at']
 
     def __str__(self):
-        return f'{self.user.email} подписан на {self.course.title}'
+        return f'{self.user.email} -> {self.course.title}'
 
-    def clean(self):
-        """Validate subscription."""
-        from django.core.exceptions import ValidationError
-        # Проверяем, что пользователь не подписывается на свой же курс
-        if self.course.owner == self.user:
-            raise ValidationError('Нельзя подписаться на свой собственный курс')
+
+class Payment(models.Model):
+    """Payment model for course purchases."""
+
+    STATUS_PENDING = 'pending'
+    STATUS_PROCESSING = 'processing'
+    STATUS_SUCCEEDED = 'succeeded'
+    STATUS_FAILED = 'failed'
+    STATUS_CANCELED = 'canceled'
+
+    STATUS_CHOICES = [
+        (STATUS_PENDING, 'Ожидает оплаты'),
+        (STATUS_PROCESSING, 'Обрабатывается'),
+        (STATUS_SUCCEEDED, 'Оплачено'),
+        (STATUS_FAILED, 'Не удалось'),
+        (STATUS_CANCELED, 'Отменено'),
+    ]
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='payments',
+        verbose_name='Пользователь',
+    )
+    course = models.ForeignKey(
+        Course,
+        on_delete=models.CASCADE,
+        related_name='payments',
+        verbose_name='Курс',
+    )
+    amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        verbose_name='Сумма',
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_PENDING,
+        verbose_name='Статус',
+    )
+    stripe_product_id = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+        verbose_name='ID продукта в Stripe',
+    )
+    stripe_price_id = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+        verbose_name='ID цены в Stripe',
+    )
+    stripe_session_id = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+        verbose_name='ID сессии в Stripe',
+    )
+    stripe_payment_intent_id = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+        verbose_name='ID платежа в Stripe',
+    )
+    payment_url = models.URLField(
+        blank=True,
+        null=True,
+        verbose_name='Ссылка на оплату',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Платеж'
+        verbose_name_plural = 'Платежи'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.user.email} - {self.course.title} - {self.amount}'
