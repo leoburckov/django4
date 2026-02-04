@@ -36,7 +36,3 @@ jobs:
         echo "✅ Restored original requirements.txt"
         EOF
 
-# Отправьте на GitHub
-git add .github/workflows/ci.yml
-git commit -m "Fix: GitHub Actions workflow with Django 4.2.10 compatibility"
-git push origin main
