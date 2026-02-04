@@ -34,7 +34,7 @@ jobs:
         # Восстанавливаем исходный requirements.txt
         sed -i 's/^# Django==6.0/Django==6.0/' requirements.txt 2>/dev/null || true
         echo "✅ Restored original requirements.txt"
-EOF
+        EOF
 
 # Отправьте на GitHub
 git add .github/workflows/ci.yml
