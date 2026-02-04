@@ -1,4 +1,4 @@
-name: CI/CD with 
+name: CI/CD with
 
 on:
   push:
@@ -16,7 +16,6 @@ jobs:
     - run: pip install Django==4.2.10
     - run: echo "✅ Tests passed"
 
-  # РЕАЛЬНЫЙ ДЕПЛОЙ НА RAILWAY (бесплатно)
   deploy-railway:
     needs: test
     runs-on: ubuntu-latest
