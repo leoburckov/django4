@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
-from .models import Course, Lesson, Payment
+from .models import Course, Lesson, Payment, Subscription
 from .services.stripe_service import StripeService
 
 User = get_user_model()
@@ -125,3 +125,23 @@ class PaymentCreateSerializer(serializers.ModelSerializer):
         )
 
         return payment
+
+
+class SubscriptionSerializer(serializers.ModelSerializer):
+    """Serializer for Subscription model."""
+
+    user_email = serializers.EmailField(source='user.email', read_only=True)
+    course_title = serializers.CharField(source='course.title', read_only=True)
+
+    class Meta:
+        model = Subscription
+        fields = [
+            'id',
+            'user',
+            'user_email',
+            'course',
+            'course_title',
+            'is_active',
+            'created_at',
+        ]
+        read_only_fields = ['user', 'is_active', 'created_at']
