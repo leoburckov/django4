@@ -30,3 +30,4 @@ jobs:
           python manage.py migrate
           pkill -f gunicorn || true
           nohup gunicorn config.wsgi:application --bind 0.0.0.0:8000 > server.log 2>&1 &
+        
