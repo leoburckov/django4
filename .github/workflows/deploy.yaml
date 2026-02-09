@@ -40,15 +40,10 @@ jobs:
           pip install redis
           pip install Django djangorestframework stripe
           pip install django-cors-headers drf-yasg 
-          pip install django-celery-beat django-celery-results celery redis
+           pip install django-celery-beat django-celery-results celery redis
 
-    - name: Run migrations and setup test DB
-      run: |
-        python manage.py migrate
-
-        python manage.py test --setup-only
-
-       
+    - name: Run migrations
+      run: python manage.py migrate
 
     - name: Run tests
       run: python manage.py test
