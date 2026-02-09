@@ -38,7 +38,10 @@ jobs:
           pip install django-celery-results
           pip install celery
           pip install redis
-        
+          pip install Django djangorestframework stripe
+          pip install django-cors-headers drf-yasg 
+          pip install django-celery-beat django-celery-results celery redis
+
     - name: Run migrations
       run: python manage.py migrate
 
