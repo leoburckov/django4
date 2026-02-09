@@ -1,141 +1,83 @@
-name: Deploy Django to Server
+name: Django CI/CD Pipeline
 
-on:
-  push:
-    branches: [main]
+on: [push, pull_request]
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Cache pip
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Install missing package
+      run: pip install django-celery-beat
+
+    - name: Run migrations
+      run: python manage.py migrate
+
+    - name: Run tests
+      run: python manage.py test
+
   deploy:
     runs-on: ubuntu-latest
-    
+    needs: test
+
     steps:
-    - name: 📥 Получить код
-      uses: actions/checkout@v4
-    
-    - name: 🔧 Исправить ВСЕ зависимости
+    - name: Set up SSH
+      uses: webfactory/ssh-agent@v0.8.1
+      with:
+        ssh-private-key: ${{ secrets.SSH_KEY }}
+
+    - name: Copy project files to server
       run: |
-        echo "🔄 Создаём полный requirements.txt со всеми зависимостями..."
-        
-        cat > requirements-complete.txt << 'EOF'
-        # Django и основные зависимости
-        Django==4.2.10
-        djangorestframework==3.14.0
-        
-        # Django расширения (совместимые с Django 4.2.10)
-        django-cors-headers==4.2.0
-        django-filter==23.5
-        django-environ==0.10.0
-        django-celery-beat==2.5.0
-        django-celery-results==2.5.1
-        
-        # Celery и Redis
-        celery==5.3.4
-        redis==5.0.1
-        
-        # База данных
-        psycopg2-binary==2.9.9
-        
-        # Веб-сервер
-        gunicorn==21.2.0
-        
-        # Дополнительные
-        pillow==10.3.0
-        drf-yasg==1.21.11
-        djangorestframework_simplejwt==5.5.1
-        
-        # Для разработки (опционально)
-        pytz==2024.1
-        python-dateutil==2.8.2
-        PyJWT==2.8.0
-        EOF
-        
-        # Заменяем оригинальный файл
-        cp requirements-complete.txt requirements.txt
-        echo "✅ requirements.txt создан со ВСЕМИ зависимостями"
-        echo "📦 Всего пакетов: $(wc -l < requirements.txt)"
-    
-    - name: 🔑 Настроить SSH доступ
+        rsync -avz --exclude '__pycache__' . ${{ secrets.SSH_USER }}@${{ secrets.SERVER_IP }}:${{ secrets.DEPLOY_DIR }}
+
+    - name: Install dependencies on server
       run: |
-        mkdir -p ~/.ssh
-        echo "${{ secrets.SSH_KEY }}" > ~/.ssh/id_rsa
-        chmod 600 ~/.ssh/id_rsa
-        ssh-keyscan -H ${{ secrets.SERVER_IP }} >> ~/.ssh/known_hosts
-    
-    - name: 🚀 Задеплоить на сервер
-      run: |
-        echo "🚀 Начинаем деплой на ${{ secrets.SERVER_IP }}..."
-        
-        # Копируем исправленные зависимости на сервер
-        scp requirements.txt ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_IP }}:/tmp/requirements-django.txt
-        
-        ssh ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_IP }} "
-          cd /var/www/django4
-          
-          echo '📥 Обновляем код...'
-          git pull origin main || echo 'Код получен'
-          
-          echo '📦 Копируем зависимости...'
-          cp /tmp/requirements-django.txt requirements.txt
-          
-          echo '🐍 Настраиваем Python окружение...'
-          python3 -m venv venv 2>/dev/null || true
+        ssh -o StrictHostKeyChecking=no ${{ secrets.SSH_USER }}@${{ secrets.SERVER_IP }} << 'EOF'
+          cd ${{ secrets.DEPLOY_DIR }}
+          python3 -m venv venv
           source venv/bin/activate
-          
-          echo '⚙️ Устанавливаем зависимости...'
-          pip install --upgrade pip
           pip install -r requirements.txt
-          
-          echo '✅ Зависимости установлены:'
-          pip list | grep -E '(Django|celery|django|gunicorn)'
-          
-          echo '🗃️ Пробуем выполнить миграции...'
-          # Пропускаем ошибки миграций если есть
-          python manage.py migrate --noinput || echo '⚠️ Миграции могут содержать ошибки'
-          
-          echo '🚀 Запускаем сервер...'
-          pkill -f gunicorn 2>/dev/null || true
-          cd /var/www/django4
-          nohup gunicorn config.wsgi:application \
-            --bind 0.0.0.0:8000 \
-            --workers 2 \
-            --access-logfile /var/www/django4/access.log \
-            --error-logfile /var/www/django4/error.log \
-            > /dev/null 2>&1 &
-          
-          echo '🎉 Сервер запущен!'
-          echo '🌐 Доступно по: http://${{ secrets.SERVER_IP }}:8000'
-        "
-    
-    - name: ✅ Проверить работу
+        EOF
+
+    - name: Apply migrations on server
       run: |
-        echo "⏳ Ждём запуска сервера..."
-        sleep 8
-        
-        echo "🔍 Проверяем приложение..."
-        
-        # Пробуем получить ответ
-        STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "http://${{ secrets.SERVER_IP }}:8000" || echo "timeout")
-        
-        echo ""
-        echo "📊 РЕЗУЛЬТАТ ДЕПЛОЯ:"
-        echo "==================="
-        
-        if [ "$STATUS" = "200" ] || [ "$STATUS" = "301" ] || [ "$STATUS" = "302" ]; then
-          echo "✅ УСПЕХ! Приложение работает!"
-          echo "🌐 Адрес: http://${{ secrets.SERVER_IP }}:8000"
-          echo "📡 HTTP статус: $STATUS"
-        elif [ "$STATUS" = "timeout" ]; then
-          echo "⚠️ Сервер запускается (таймаут)"
-          echo "🌐 Адрес: http://${{ secrets.SERVER_IP }}:8000"
-          echo "💡 Может потребоваться время для полного запуска"
-        else
-          echo "⚠️ Сервер ответил с кодом: $STATUS"
-          echo "🌐 Адрес: http://${{ secrets.SERVER_IP }}:8000"
-          echo "📝 Возможно требуются дополнительные настройки"
-        fi
-        
-        echo ""
-        echo "🎉 ДЕПЛОЙ ВЫПОЛНЕН!"
-        echo "✅ Все зависимости установлены"
-        echo "✅ Приложение развёрнуто"
-        echo "✅ Сервер запущен"
+        ssh -o StrictHostKeyChecking=no ${{ secrets.SSH_USER }}@${{ secrets.SERVER_IP }} << 'EOF'
+          cd ${{ secrets.DEPLOY_DIR }}
+          source venv/bin/activate
+          python manage.py migrate
+        EOF
+
+    - name: Collect static files on server
+      run: |
+        ssh -o StrictHostKeyChecking=no ${{ secrets.SSH_USER }}@${{ secrets.SERVER_IP }} << 'EOF'
+          cd ${{ secrets.DEPLOY_DIR }}
+          source venv/bin/activate
+          python manage.py collectstatic --noinput
+        EOF
+
+    - name: Restart application
+      run: |
+        ssh -o StrictHostKeyChecking=no ${{ secrets.SSH_USER }}@${{ secrets.SERVER_IP }} << 'EOF'
+          sudo systemctl restart myapp.service
+        EOF
