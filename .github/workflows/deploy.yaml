@@ -58,7 +58,6 @@ jobs:
 
       with:
         ssh-private-key: ${{ secrets.SSH_KEY }}
-        ssh-passphrase: ${{ secrets.SSH_KEY_PASSPHRASE }}
 
     - name: Copy project files to server
       run: |
