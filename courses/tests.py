@@ -8,7 +8,6 @@ from users.models import User
 from .models import Course, Lesson, Subscription
 from .validators import validate_youtube_url
 from django.core.exceptions import ValidationError
-from django.db import connection
 
 
 class YouTubeURLValidatorTest(TestCase):
@@ -98,15 +97,17 @@ class CourseAPITestCase(APITestCase):
             last_name="Тестовый",
         )
 
-        # Создаем курсы - ПРОСТО БЕЗ поля price
+        # Создаем курсы С полем price
         self.course1 = Course.objects.create(
             title="Курс 1",
-            description="Описание курса 1"
+            description="Описание курса 1",
+            price=1000.00
         )
 
         self.course2 = Course.objects.create(
             title="Курс 2",
-            description="Описание курса 2"
+            description="Описание курса 2",
+            price=2000.00
         )
 
         # Пытаемся установить владельца
@@ -180,16 +181,23 @@ class CourseAPITestCase(APITestCase):
     def test_create_course_as_user(self):
         """Test creating course as regular user."""
         self.client.force_authenticate(user=self.user1)
-        data = {"title": "Новый курс", "description": "Описание нового курса"}
+        data = {
+            "title": "Новый курс",
+            "description": "Описание нового курса",
+            "price": 1500.00
+        }
 
-        # Не добавляем price вообще
         response = self.client.post(self.courses_url, data)
         self.assertIn(response.status_code, [status.HTTP_201_CREATED, status.HTTP_403_FORBIDDEN])
 
     def test_create_course_as_moderator(self):
         """Test that moderator cannot create course."""
         self.client.force_authenticate(user=self.moderator)
-        data = {"title": "Курс от модератора", "description": "Описание"}
+        data = {
+            "title": "Курс от модератора",
+            "description": "Описание",
+            "price": 3000.00
+        }
 
         response = self.client.post(self.courses_url, data)
         self.assertIn(response.status_code, [status.HTTP_403_FORBIDDEN, status.HTTP_201_CREATED])
@@ -198,7 +206,7 @@ class CourseAPITestCase(APITestCase):
         """Test updating own course if ownership is set."""
         self.client.force_authenticate(user=self.user1)
         url = reverse("course-detail", args=[self.course1.id])
-        data = {"title": "Обновленное название"}
+        data = {"title": "Обновленное название", "price": 1200.00}
         response = self.client.patch(url, data)
 
         if response.status_code == status.HTTP_200_OK:
@@ -209,7 +217,7 @@ class CourseAPITestCase(APITestCase):
         """Test that user cannot update other user's course."""
         self.client.force_authenticate(user=self.user1)
         url = reverse("course-detail", args=[self.course2.id])
-        data = {"title": "Попытка изменить чужой курс"}
+        data = {"title": "Попытка изменить чужой курс", "price": 2500.00}
         response = self.client.patch(url, data)
         self.assertIn(response.status_code, [status.HTTP_200_OK, status.HTTP_403_FORBIDDEN])
 
@@ -217,7 +225,7 @@ class CourseAPITestCase(APITestCase):
         """Test that moderator can update any course."""
         self.client.force_authenticate(user=self.moderator)
         url = reverse("course-detail", args=[self.course1.id])
-        data = {"title": "Изменено модератором"}
+        data = {"title": "Изменено модератором", "price": 1500.00}
         response = self.client.patch(url, data)
 
         if response.status_code == status.HTTP_200_OK:
@@ -307,15 +315,17 @@ class SubscriptionAPITestCase(APITestCase):
             last_name="Тестовый",
         )
 
-        # Создаем курсы БЕЗ поля price
+        # Создаем курсы с полем price
         self.course = Course.objects.create(
             title="Курс для подписки",
             description="Описание",
+            price=1000.00
         )
 
         self.course_user1 = Course.objects.create(
             title="Курс пользователя 1",
             description="Описание",
+            price=2000.00
         )
 
         # Пытаемся установить владельцев
@@ -414,7 +424,8 @@ class PaginationTestCase(APITestCase):
         for i in range(15):
             Course.objects.create(
                 title=f"Курс {i}",
-                description=f"Описание курса {i}"
+                description=f"Описание курса {i}",
+                price=1000.00 + (i * 100)
             )
 
         # Пытаемся установить владельца для всех курсов
@@ -474,7 +485,8 @@ class LessonPaginationTestCase(APITestCase):
         # Создаем курс
         self.course = Course.objects.create(
             title="Тестовый курс",
-            description="Описание"
+            description="Описание",
+            price=1000.00
         )
 
         # Устанавливаем владельца курса
@@ -534,12 +546,14 @@ class BasicModelTestCase(TestCase):
 
     def test_course_creation(self):
         """Test that course can be created."""
-        # Просто создаем курс без поля price
+        # Создаем курс с полем price
         course = Course.objects.create(
             title="Тестовый курс",
-            description="Тестовое описание"
+            description="Тестовое описание",
+            price=1000.00
         )
         self.assertEqual(course.title, "Тестовый курс")
+        self.assertEqual(course.price, 1000.00)
         self.assertTrue(course.pk is not None)
 
     def test_lesson_creation(self):
@@ -547,7 +561,8 @@ class BasicModelTestCase(TestCase):
         # Сначала создаем курс
         course = Course.objects.create(
             title="Курс для урока",
-            description="Описание"
+            description="Описание",
+            price=1500.00
         )
 
         # Теперь создаем урок
@@ -571,7 +586,8 @@ class BasicModelTestCase(TestCase):
         # Создаем курс
         course = Course.objects.create(
             title="Курс для подписки",
-            description="Описание"
+            description="Описание",
+            price=2000.00
         )
 
         subscription = Subscription.objects.create(
