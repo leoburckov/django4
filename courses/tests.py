@@ -8,6 +8,7 @@ from users.models import User
 from .models import Course, Lesson, Subscription
 from .validators import validate_youtube_url
 from django.core.exceptions import ValidationError
+from django.db import connection
 
 
 class YouTubeURLValidatorTest(TestCase):
@@ -97,27 +98,16 @@ class CourseAPITestCase(APITestCase):
             last_name="Тестовый",
         )
 
-        # Создаем курсы - проверяем наличие поля price
-        course_data = {
-            "title": "Курс 1",
-            "description": "Описание курса 1"
-        }
+        # Создаем курсы - ПРОСТО БЕЗ поля price
+        self.course1 = Course.objects.create(
+            title="Курс 1",
+            description="Описание курса 1"
+        )
 
-        # Если в модели есть поле price, добавляем его
-        if hasattr(Course, 'price'):
-            course_data["price"] = 0.00
-
-        self.course1 = Course.objects.create(**course_data)
-
-        course_data2 = {
-            "title": "Курс 2",
-            "description": "Описание курса 2"
-        }
-
-        if hasattr(Course, 'price'):
-            course_data2["price"] = 0.00
-
-        self.course2 = Course.objects.create(**course_data2)
+        self.course2 = Course.objects.create(
+            title="Курс 2",
+            description="Описание курса 2"
+        )
 
         # Пытаемся установить владельца
         self._set_course_owner(self.course1, self.user1)
@@ -192,13 +182,7 @@ class CourseAPITestCase(APITestCase):
         self.client.force_authenticate(user=self.user1)
         data = {"title": "Новый курс", "description": "Описание нового курса"}
 
-        # Если в модели есть поле price и оно обязательно, добавляем
-        if hasattr(Course, 'price'):
-            # Проверяем, является ли поле обязательным
-            price_field = Course._meta.get_field('price')
-            if not price_field.blank and not price_field.null:
-                data["price"] = 0.00
-
+        # Не добавляем price вообще
         response = self.client.post(self.courses_url, data)
         self.assertIn(response.status_code, [status.HTTP_201_CREATED, status.HTTP_403_FORBIDDEN])
 
@@ -206,11 +190,6 @@ class CourseAPITestCase(APITestCase):
         """Test that moderator cannot create course."""
         self.client.force_authenticate(user=self.moderator)
         data = {"title": "Курс от модератора", "description": "Описание"}
-
-        if hasattr(Course, 'price'):
-            price_field = Course._meta.get_field('price')
-            if not price_field.blank and not price_field.null:
-                data["price"] = 0.00
 
         response = self.client.post(self.courses_url, data)
         self.assertIn(response.status_code, [status.HTTP_403_FORBIDDEN, status.HTTP_201_CREATED])
@@ -328,26 +307,16 @@ class SubscriptionAPITestCase(APITestCase):
             last_name="Тестовый",
         )
 
-        # Создаем курсы - проверяем наличие поля price
-        course_data = {
-            "title": "Курс для подписки",
-            "description": "Описание",
-        }
+        # Создаем курсы БЕЗ поля price
+        self.course = Course.objects.create(
+            title="Курс для подписки",
+            description="Описание",
+        )
 
-        if hasattr(Course, 'price'):
-            course_data["price"] = 0.00
-
-        self.course = Course.objects.create(**course_data)
-
-        course_data2 = {
-            "title": "Курс пользователя 1",
-            "description": "Описание",
-        }
-
-        if hasattr(Course, 'price'):
-            course_data2["price"] = 0.00
-
-        self.course_user1 = Course.objects.create(**course_data2)
+        self.course_user1 = Course.objects.create(
+            title="Курс пользователя 1",
+            description="Описание",
+        )
 
         # Пытаемся установить владельцев
         self._set_course_owner(self.course, self.user2)
@@ -443,15 +412,10 @@ class PaginationTestCase(APITestCase):
 
         # Создаем много курсов для тестирования пагинации
         for i in range(15):
-            course_data = {
-                "title": f"Курс {i}",
-                "description": f"Описание курса {i}"
-            }
-
-            if hasattr(Course, 'price'):
-                course_data["price"] = 0.00
-
-            Course.objects.create(**course_data)
+            Course.objects.create(
+                title=f"Курс {i}",
+                description=f"Описание курса {i}"
+            )
 
         # Пытаемся установить владельца для всех курсов
         for course in Course.objects.all():
@@ -508,15 +472,10 @@ class LessonPaginationTestCase(APITestCase):
         self.user = User.objects.create_user(email="user@test.com", password="user123")
 
         # Создаем курс
-        course_data = {
-            "title": "Тестовый курс",
-            "description": "Описание"
-        }
-
-        if hasattr(Course, 'price'):
-            course_data["price"] = 0.00
-
-        self.course = Course.objects.create(**course_data)
+        self.course = Course.objects.create(
+            title="Тестовый курс",
+            description="Описание"
+        )
 
         # Устанавливаем владельца курса
         try:
@@ -575,31 +534,21 @@ class BasicModelTestCase(TestCase):
 
     def test_course_creation(self):
         """Test that course can be created."""
-        course_data = {
-            "title": "Тестовый курс",
-            "description": "Тестовое описание"
-        }
-
-        # Проверяем наличие поля price
-        if hasattr(Course, 'price'):
-            course_data["price"] = 0.00
-
-        course = Course.objects.create(**course_data)
+        # Просто создаем курс без поля price
+        course = Course.objects.create(
+            title="Тестовый курс",
+            description="Тестовое описание"
+        )
         self.assertEqual(course.title, "Тестовый курс")
         self.assertTrue(course.pk is not None)
 
     def test_lesson_creation(self):
         """Test that lesson can be created."""
         # Сначала создаем курс
-        course_data = {
-            "title": "Курс для урока",
-            "description": "Описание"
-        }
-
-        if hasattr(Course, 'price'):
-            course_data["price"] = 0.00
-
-        course = Course.objects.create(**course_data)
+        course = Course.objects.create(
+            title="Курс для урока",
+            description="Описание"
+        )
 
         # Теперь создаем урок
         lesson = Lesson.objects.create(
@@ -620,15 +569,10 @@ class BasicModelTestCase(TestCase):
         )
 
         # Создаем курс
-        course_data = {
-            "title": "Курс для подписки",
-            "description": "Описание"
-        }
-
-        if hasattr(Course, 'price'):
-            course_data["price"] = 0.00
-
-        course = Course.objects.create(**course_data)
+        course = Course.objects.create(
+            title="Курс для подписки",
+            description="Описание"
+        )
 
         subscription = Subscription.objects.create(
             user=user,
